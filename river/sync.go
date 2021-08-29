@@ -191,10 +191,14 @@ func makeNestedFieldInsertRequest(
 ) map[string]interface{} {
 	return map[string]interface{}{
 		"script": map[string]interface{}{
-			"source": fmt.Sprintf(`ctx._source.%s.add(params.item)`, nestedField),
-			"params": map[string]interface{}{
-				"item": data,
-			},
+			"source": fmt.Sprintf(`
+					if (ctx._source.%s == null) {
+							ctx._source.%s = new ArrayList();
+						}
+					ctx._source.%s.add(params);`,
+				nestedField, nestedField, nestedField,
+			),
+			"params": data,
 		},
 	}
 }
@@ -206,8 +210,13 @@ func makeNestedFieldUpdateRequest(
 	return map[string]interface{}{
 		"script": map[string]interface{}{
 			"source": fmt.Sprintf(
-				`ctx._source.%s.removeIf(item -> item.%s == params.%s); ctx._source.%s.add(params)`,
-				nestedField, primaryKey, primaryKey, nestedField,
+				`if (ctx._source.%s == null) {
+							ctx._source.%s = new ArrayList();
+						}
+						ctx._source.%s.removeIf(item -> item.%s == params.%s); 
+						ctx._source.%s.add(params)`,
+				nestedField, nestedField, nestedField, primaryKey, primaryKey,
+				nestedField,
 			),
 			"params": data,
 		},
@@ -241,6 +250,7 @@ func (r *River) makeRequest(rule *Rule, action string, rows [][]interface{}) ([]
 		if action == canal.DeleteAction {
 			req.Action = elastic.ActionDelete
 			if rule.NestedRule {
+				req.NestedField = true
 				req.Action = elastic.ActionUpdate
 				allFields := make(map[string]interface{}, len(values))
 				for idx, column := range rule.TableInfo.Columns {
@@ -430,9 +440,14 @@ func (r *River) makeInsertReqData(req *elastic.BulkRequest, rule *Rule, values [
 	req.Action = elastic.ActionIndex
 	// nested field add data
 	if rule.NestedRule {
+		req.NestedField = true
+		req.Action = elastic.ActionUpdate
 		allFields := make(map[string]interface{}, len(values))
 		for idx, column := range rule.TableInfo.Columns {
 			allFields[column.Name] = values[idx]
+			if column.Name == rule.IndexField {
+				req.ID = fmt.Sprintf("%v", values[idx])
+			}
 		}
 		req.Data = makeNestedFieldInsertRequest(rule.NestedField, allFields)
 		return
@@ -459,6 +474,8 @@ func (r *River) makeUpdateReqData(req *elastic.BulkRequest, rule *Rule,
 	beforeValues []interface{}, afterValues []interface{}) {
 	req.Data = make(map[string]interface{}, len(beforeValues))
 	if rule.NestedRule {
+		req.NestedField = true
+		req.Action = elastic.ActionUpdate
 		allFields := make(map[string]interface{}, len(afterValues))
 		for idx, column := range rule.TableInfo.Columns {
 			allFields[column.Name] = afterValues[idx]

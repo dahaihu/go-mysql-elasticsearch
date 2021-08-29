@@ -15,7 +15,7 @@ type Rule struct {
 	Table  string `toml:"table"`
 	// only one could be used
 	Index       string `toml:"index"`
-	IndexField  string `toml:"index_filed"`
+	IndexField  string `toml:"index_field"`
 	NestedRule  bool   `toml:"nested_rule"`
 	NestedField string `toml:"nested_filed"`
 	// nested field primary key

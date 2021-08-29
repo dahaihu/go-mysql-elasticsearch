@@ -49,13 +49,7 @@ skip_no_pk_table = true
 [[source]]
 schema = "sync_es"
 
-tables = ["customer", "resource", "resource_role"]
-
-[[rule]]
-schema = "sync_es"
-table = "customer"
-index = "customer"
-type = "_doc"
+tables = ["resource", "resource_role"]
 
 [[rule]]
 schema = "sync_es"
