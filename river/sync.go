@@ -220,6 +220,7 @@ func (r *River) makeNestedRequest(rule *Rule, action string, rows [][]interface{
 
 // for insert and delete
 func (r *River) makeRequest(rule *Rule, action string, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
+	fmt.Printf("schame is %s, table is %s, nested rule is %v\n", rule.Schema, rule.Table, rule.NestedRule)
 	reqs := make([]*elastic.BulkRequest, 0, len(rows))
 
 	for _, values := range rows {
@@ -239,12 +240,22 @@ func (r *River) makeRequest(rule *Rule, action string, rows [][]interface{}) ([]
 
 		if action == canal.DeleteAction {
 			req.Action = elastic.ActionDelete
+			if rule.NestedRule {
+				req.Action = elastic.ActionUpdate
+				allFields := make(map[string]interface{}, len(values))
+				for idx, column := range rule.TableInfo.Columns {
+					allFields[column.Name] = values[idx]
+				}
+				req.Data = makeNestedFieldDelRequest(rule.NestedField, rule.NestedPrimaryKey, allFields)
+			}
 			esDeleteNum.WithLabelValues(rule.Index).Inc()
 		} else {
 			r.makeInsertReqData(req, rule, values)
 			esInsertNum.WithLabelValues(rule.Index).Inc()
 		}
-
+		fmt.Printf("action is %s, index is %s, type is %s, data is %v\n",
+			req.Action, req.Index, req.Type, req.Data,
+		)
 		reqs = append(reqs, req)
 	}
 
@@ -417,7 +428,15 @@ func (r *River) getFieldParts(k string, v string) (string, string, string) {
 func (r *River) makeInsertReqData(req *elastic.BulkRequest, rule *Rule, values []interface{}) {
 	req.Data = make(map[string]interface{}, len(values))
 	req.Action = elastic.ActionIndex
-
+	// nested field add data
+	if rule.NestedRule {
+		allFields := make(map[string]interface{}, len(values))
+		for idx, column := range rule.TableInfo.Columns {
+			allFields[column.Name] = values[idx]
+		}
+		req.Data = makeNestedFieldInsertRequest(rule.NestedField, allFields)
+		return
+	}
 	for i, c := range rule.TableInfo.Columns {
 		if !rule.CheckFilter(c.Name) {
 			continue
@@ -439,7 +458,17 @@ func (r *River) makeInsertReqData(req *elastic.BulkRequest, rule *Rule, values [
 func (r *River) makeUpdateReqData(req *elastic.BulkRequest, rule *Rule,
 	beforeValues []interface{}, afterValues []interface{}) {
 	req.Data = make(map[string]interface{}, len(beforeValues))
-
+	if rule.NestedRule {
+		allFields := make(map[string]interface{}, len(afterValues))
+		for idx, column := range rule.TableInfo.Columns {
+			allFields[column.Name] = afterValues[idx]
+			if column.Name == rule.IndexField {
+				req.ID = fmt.Sprintf("%v", afterValues[idx])
+			}
+		}
+		req.Data = makeNestedFieldUpdateRequest(rule.NestedField, rule.NestedPrimaryKey, allFields)
+		return
+	}
 	// maybe dangerous if something wrong delete before?
 	req.Action = elastic.ActionUpdate
 

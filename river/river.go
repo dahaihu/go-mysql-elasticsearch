@@ -257,6 +257,7 @@ func (r *River) prepareRule() error {
 				}
 				rule.prepare()
 				r.rules[key] = rule
+				fmt.Printf("key is %s, rule is %v\n", key, rule)
 			}
 		}
 	}

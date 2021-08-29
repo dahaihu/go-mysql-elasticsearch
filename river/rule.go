@@ -16,10 +16,10 @@ type Rule struct {
 	// only one could be used
 	Index       string `toml:"index"`
 	IndexField  string `toml:"index_filed"`
-	NestedRule  bool   `json:"nested_rule"`
-	NestedField string `json:"nested_filed"`
+	NestedRule  bool   `toml:"nested_rule"`
+	NestedField string `toml:"nested_filed"`
 	// nested field primary key
-	NestedPrimaryKey string   `json:"nested_primary_key"`
+	NestedPrimaryKey string   `toml:"nested_primary_key"`
 	Type             string   `toml:"type"`
 	Parent           string   `toml:"parent"`
 	ID               []string `toml:"id"`

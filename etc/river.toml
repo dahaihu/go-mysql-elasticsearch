@@ -49,14 +49,26 @@ skip_no_pk_table = true
 [[source]]
 schema = "sync_es"
 
-tables = ["customer", "resource"]
+tables = ["customer", "resource", "resource_role"]
 
-[[source]]
-nested_rule = true
+[[rule]]
 schema = "sync_es"
-tables = ["resource_role"]
+table = "customer"
+index = "customer"
+type = "_doc"
+
+[[rule]]
+schema = "sync_es"
+table = "resource"
 index = "resource"
+type = "_doc"
+
+[[rule]]
+schema = "sync_es"
+type = "_doc"
+table = "resource_role"
+index = "resource"
+nested_rule = true
 index_field = "resource_id"
 nested_filed = "user_role"
 nested_primary_key = "user_id"
-
