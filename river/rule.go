@@ -1,6 +1,7 @@
 package river
 
 import (
+	"github.com/siddontang/go-mysql-elasticsearch/elastic"
 	"strings"
 
 	"github.com/siddontang/go-mysql/schema"
@@ -88,4 +89,26 @@ func (r *Rule) CheckFilter(field string) bool {
 		}
 	}
 	return false
+}
+
+func (r *Rule) makeInsertReqData(req *elastic.BulkRequest, river *River,
+	values []interface{}) {
+	req.Data = make(map[string]interface{}, len(values))
+	req.Action = elastic.ActionIndex
+	for i, c := range r.TableInfo.Columns {
+		if !r.CheckFilter(c.Name) {
+			continue
+		}
+		mapped := false
+		for k, v := range r.FieldMapping {
+			mysql, elastic, fieldType := river.getFieldParts(k, v)
+			if mysql == c.Name {
+				mapped = true
+				req.Data[elastic] = river.getFieldValue(&c, fieldType, values[i])
+			}
+		}
+		if mapped == false {
+			req.Data[c.Name] = river.makeReqColumnData(&c, values[i])
+		}
+	}
 }

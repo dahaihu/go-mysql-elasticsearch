@@ -80,13 +80,13 @@ const (
 
 // BulkRequest is used to send multi request in batch.
 type BulkRequest struct {
-	NestedField bool
-	Action      string
-	Index       string
-	Type        string
-	ID          string
-	Parent      string
-	Pipeline    string
+	NestedRequest bool
+	Action        string
+	Index         string
+	Type          string
+	ID            string
+	Parent        string
+	Pipeline      string
 
 	Data map[string]interface{}
 }
@@ -128,7 +128,7 @@ func (r *BulkRequest) bulk(buf *bytes.Buffer) error {
 		doc := map[string]interface{}{
 			"doc": r.Data,
 		}
-		if r.NestedField {
+		if r.NestedRequest {
 			doc = r.Data
 		}
 		data, err = json.Marshal(doc)

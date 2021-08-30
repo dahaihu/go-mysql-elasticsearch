@@ -250,7 +250,7 @@ func (r *River) makeRequest(rule *Rule, action string, rows [][]interface{}) ([]
 		if action == canal.DeleteAction {
 			req.Action = elastic.ActionDelete
 			if rule.NestedRule {
-				req.NestedField = true
+				req.NestedRequest = true
 				req.Action = elastic.ActionUpdate
 				allFields := make(map[string]interface{}, len(values))
 				for idx, column := range rule.TableInfo.Columns {
@@ -440,7 +440,7 @@ func (r *River) makeInsertReqData(req *elastic.BulkRequest, rule *Rule, values [
 	req.Action = elastic.ActionIndex
 	// nested field add data
 	if rule.NestedRule {
-		req.NestedField = true
+		req.NestedRequest = true
 		req.Action = elastic.ActionUpdate
 		allFields := make(map[string]interface{}, len(values))
 		for idx, column := range rule.TableInfo.Columns {
@@ -474,7 +474,7 @@ func (r *River) makeUpdateReqData(req *elastic.BulkRequest, rule *Rule,
 	beforeValues []interface{}, afterValues []interface{}) {
 	req.Data = make(map[string]interface{}, len(beforeValues))
 	if rule.NestedRule {
-		req.NestedField = true
+		req.NestedRequest = true
 		req.Action = elastic.ActionUpdate
 		allFields := make(map[string]interface{}, len(afterValues))
 		for idx, column := range rule.TableInfo.Columns {
