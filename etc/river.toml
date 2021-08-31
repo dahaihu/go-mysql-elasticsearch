@@ -30,7 +30,7 @@ flavor = "mysql"
 
 # mysqldump execution path
 # if not set or empty, ignore mysqldump.
-mysqldump = "mysqldump"
+#mysqldump = "mysqldump"
 
 # if we have no privilege to use mysqldump with --master-data,
 # we must skip it.
@@ -57,12 +57,11 @@ table = "resource"
 index = "resource"
 type = "_doc"
 
-[[rule]]
+[[nested_rule]]
 schema = "sync_es"
-type = "_doc"
 table = "resource_role"
+type = "_doc"
 index = "resource"
-nested_rule = true
 index_field = "resource_id"
 nested_filed = "user_role"
 nested_primary_key = "user_id"

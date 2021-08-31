@@ -174,6 +174,7 @@ func (r *River) parseSource() (map[string][]string, error) {
 				return nil, errors.Errorf("empty schema not allowed for source")
 			}
 
+			// check table is regular expression
 			if regexp.QuoteMeta(table) != table {
 				if _, ok := wildTables[ruleKey(s.Schema, table)]; ok {
 					return nil, errors.Errorf("duplicate wildcard table defined for %s.%s", s.Schema, table)

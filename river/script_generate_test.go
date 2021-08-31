@@ -3,6 +3,7 @@ package river
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 )
 
@@ -40,5 +41,9 @@ func TestMakeNestedFieldUpdateRequest(t *testing.T) {
 	fmt.Println(
 		string(dataS),
 	)
+}
+
+func TestMatch(t *testing.T) {
+	fmt.Println(regexp.QuoteMeta(`Escaping symbols like: .+*?()|[]{}^$`))
 }
 

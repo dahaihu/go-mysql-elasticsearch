@@ -38,7 +38,8 @@ type Config struct {
 
 	Sources []SourceConfig `toml:"source"`
 
-	Rules []*Rule `toml:"rule"`
+	Rules       []*Rule       `toml:"rule"`
+	NestedRules []*NestedRule `toml:"nested_rule"`
 
 	BulkSize int `toml:"bulk_size"`
 
