@@ -170,58 +170,6 @@ func (r *River) syncLoop() {
 	}
 }
 
-// make delete nested filed data
-func makeNestedFieldDelRequest(
-	nestedField, primaryKey string, data map[string]interface{},
-) map[string]interface{} {
-	return map[string]interface{}{
-		"script": map[string]interface{}{
-			"source": fmt.Sprintf(
-				`ctx._source.%s.removeIf(item -> item.%s == params.%s)`,
-				nestedField, primaryKey, primaryKey,
-			),
-			"params": data,
-		},
-	}
-}
-
-// make insert nested filed data
-func makeNestedFieldInsertRequest(
-	nestedField string, data map[string]interface{},
-) map[string]interface{} {
-	return map[string]interface{}{
-		"script": map[string]interface{}{
-			"source": fmt.Sprintf(`
-					if (ctx._source.%s == null) {
-							ctx._source.%s = new ArrayList();
-						}
-					ctx._source.%s.add(params);`,
-				nestedField, nestedField, nestedField,
-			),
-			"params": data,
-		},
-	}
-}
-
-// make nested field update data
-func makeNestedFieldUpdateRequest(
-	nestedField, primaryKey string, data map[string]interface{},
-) map[string]interface{} {
-	return map[string]interface{}{
-		"script": map[string]interface{}{
-			"source": fmt.Sprintf(
-				`if (ctx._source.%s == null) {
-							ctx._source.%s = new ArrayList();
-						}
-						ctx._source.%s.removeIf(item -> item.%s == params.%s); 
-						ctx._source.%s.add(params)`,
-				nestedField, nestedField, nestedField, primaryKey, primaryKey,
-				nestedField,
-			),
-			"params": data,
-		},
-	}
-}
 
 func (r *River) makeNestedRequest(rule *Rule, action string, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
 	return nil, nil

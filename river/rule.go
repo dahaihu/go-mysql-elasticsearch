@@ -15,15 +15,12 @@ type Rule struct {
 	Schema string `toml:"schema"`
 	Table  string `toml:"table"`
 	// only one could be used
-	Index       string `toml:"index"`
-	IndexField  string `toml:"index_field"`
-	NestedRule  bool   `toml:"nested_rule"`
-	NestedField string `toml:"nested_filed"`
-	// nested field primary key
-	NestedPrimaryKey string   `toml:"nested_primary_key"`
-	Type             string   `toml:"type"`
-	Parent           string   `toml:"parent"`
-	ID               []string `toml:"id"`
+	Index      string   `toml:"index"`
+	IndexField string   `toml:"index_field"`
+	NestedRule bool     `toml:"nested_rule"`
+	Type       string   `toml:"type"`
+	Parent     string   `toml:"parent"`
+	ID         []string `toml:"id"`
 
 	// Default, a MySQL table field name is mapped to Elasticsearch field name.
 	// Sometimes, you want to use different name, e.g, the MySQL file name is title,
@@ -91,8 +88,7 @@ func (r *Rule) CheckFilter(field string) bool {
 	return false
 }
 
-func (r *Rule) makeInsertReqData(req *elastic.BulkRequest, river *River,
-	values []interface{}) {
+func (r *Rule) makeInsertReqData(req *elastic.BulkRequest, values []interface{}) {
 	req.Data = make(map[string]interface{}, len(values))
 	req.Action = elastic.ActionIndex
 	for i, c := range r.TableInfo.Columns {
@@ -101,14 +97,14 @@ func (r *Rule) makeInsertReqData(req *elastic.BulkRequest, river *River,
 		}
 		mapped := false
 		for k, v := range r.FieldMapping {
-			mysql, elastic, fieldType := river.getFieldParts(k, v)
-			if mysql == c.Name {
+			if c.Name == k {
+				req.Data[v] = values[i]
 				mapped = true
-				req.Data[elastic] = river.getFieldValue(&c, fieldType, values[i])
+				break
 			}
 		}
 		if mapped == false {
-			req.Data[c.Name] = river.makeReqColumnData(&c, values[i])
+			req.Data[c.Name] = values[i]
 		}
 	}
 }
