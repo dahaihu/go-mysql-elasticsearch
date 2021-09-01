@@ -79,8 +79,7 @@ func (r *NestedRule)makeNestedFieldUpdateRequest(data map[string]interface{}) ma
 				`if (ctx._source.%[1]s == null) {
 							ctx._source.%[1]s = new ArrayList();
 						}
-						ctx._source.%[1]s.removeIf(item -> item.
-%[2]s == params.%[2]s); 
+						ctx._source.%[1]s.removeIf(item -> item.%[2]s == params.%[2]s); 
 						ctx._source.%[1]s.add(params)`,
 				r.NestedField, r.NestedPrimaryKey,
 			),
