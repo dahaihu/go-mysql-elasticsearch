@@ -1,7 +1,14 @@
 package river
 
-import "github.com/siddontang/go-mysql-elasticsearch/elastic"
+import (
+	"github.com/siddontang/go-mysql-elasticsearch/elastic"
+	"github.com/siddontang/go-mysql/schema"
+)
 
 type RuleInterface interface {
-	makeInsertReqData(*elastic.BulkRequest, []interface{})
+	makeRequest(string, [][]interface{}) ([]*elastic.BulkRequest, error)
+	getTable() string
+	getSchema() string
+	setTableInfo(*schema.Table)
+	getTableInfo() *schema.Table
 }

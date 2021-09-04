@@ -10,6 +10,7 @@ import (
 	"net/url"
 
 	"github.com/juju/errors"
+	"github.com/siddontang/go-log/log"
 )
 
 // Client is the client to communicate with ES.
@@ -246,7 +247,7 @@ func (c *Client) DoBulk(url string, items []*BulkRequest) (*BulkResponse, error)
 			return nil, errors.Trace(err)
 		}
 	}
-	fmt.Println("send data is ", buf.String())
+	log.Info("send data is ", buf.String())
 	resp, err := c.DoRequest("POST", url, &buf)
 	if err != nil {
 		return nil, errors.Trace(err)

@@ -47,6 +47,7 @@ func (h *eventHandler) OnRotate(e *replication.RotateEvent) error {
 }
 
 func (h *eventHandler) OnTableChanged(schema, table string) error {
+	log.Infof("%s.%s changed", schema, table)
 	err := h.r.updateRule(schema, table)
 	if err != nil && err != ErrRuleNotExist {
 		return errors.Trace(err)
@@ -65,24 +66,13 @@ func (h *eventHandler) OnXID(nextPos mysql.Position) error {
 }
 
 func (h *eventHandler) OnRow(e *canal.RowsEvent) error {
+	//log.Info("action data is ", e.Action, e.Rows)
 	rule, ok := h.r.rules[ruleKey(e.Table.Schema, e.Table.Name)]
 	if !ok {
 		return nil
 	}
-
-	var reqs []*elastic.BulkRequest
-	var err error
-	switch e.Action {
-	case canal.InsertAction:
-		reqs, err = h.r.makeInsertRequest(rule, e.Rows)
-	case canal.DeleteAction:
-		reqs, err = h.r.makeDeleteRequest(rule, e.Rows)
-	case canal.UpdateAction:
-		reqs, err = h.r.makeUpdateRequest(rule, e.Rows)
-	default:
-		err = errors.Errorf("invalid rows action %s", e.Action)
-	}
-
+	//log.Infof("table info is %v", rule.getTableInfo())
+	reqs, err := rule.makeRequest(e.Action, e.Rows)
 	if err != nil {
 		h.r.cancel()
 		return errors.Errorf("make %s ES request err %v, close sync", e.Action, err)
@@ -128,7 +118,7 @@ func (r *River) syncLoop() {
 	for {
 		needFlush := false
 		needSavePos := false
-
+		// todo ticker update
 		select {
 		case v := <-r.syncCh:
 			switch v := v.(type) {
@@ -168,123 +158,6 @@ func (r *River) syncLoop() {
 			}
 		}
 	}
-}
-
-
-func (r *River) makeNestedRequest(rule *Rule, action string, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
-	return nil, nil
-}
-
-// for insert and delete
-func (r *River) makeRequest(rule *Rule, action string, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
-	fmt.Printf("schame is %s, table is %s, nested rule is %v\n", rule.Schema, rule.Table, rule.NestedRule)
-	reqs := make([]*elastic.BulkRequest, 0, len(rows))
-
-	for _, values := range rows {
-		id, err := r.getDocID(rule, values)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		parentID := ""
-		if len(rule.Parent) > 0 {
-			if parentID, err = r.getParentID(rule, values, rule.Parent); err != nil {
-				return nil, errors.Trace(err)
-			}
-		}
-
-		req := &elastic.BulkRequest{Index: rule.Index, Type: rule.Type, ID: id, Parent: parentID, Pipeline: rule.Pipeline}
-
-		if action == canal.DeleteAction {
-			req.Action = elastic.ActionDelete
-			if rule.NestedRule {
-				req.NestedRequest = true
-				req.Action = elastic.ActionUpdate
-				allFields := make(map[string]interface{}, len(values))
-				for idx, column := range rule.TableInfo.Columns {
-					allFields[column.Name] = values[idx]
-				}
-				req.Data = makeNestedFieldDelRequest(rule.NestedField, rule.NestedPrimaryKey, allFields)
-			}
-			esDeleteNum.WithLabelValues(rule.Index).Inc()
-		} else {
-			r.makeInsertReqData(req, rule, values)
-			esInsertNum.WithLabelValues(rule.Index).Inc()
-		}
-		fmt.Printf("action is %s, index is %s, type is %s, data is %v\n",
-			req.Action, req.Index, req.Type, req.Data,
-		)
-		reqs = append(reqs, req)
-	}
-
-	return reqs, nil
-}
-
-func (r *River) makeInsertRequest(rule *Rule, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
-	return r.makeRequest(rule, canal.InsertAction, rows)
-}
-
-func (r *River) makeDeleteRequest(rule *Rule, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
-	return r.makeRequest(rule, canal.DeleteAction, rows)
-}
-
-func (r *River) makeUpdateRequest(rule *Rule, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
-	if len(rows)%2 != 0 {
-		return nil, errors.Errorf("invalid update rows event, must have 2x rows, but %d", len(rows))
-	}
-
-	reqs := make([]*elastic.BulkRequest, 0, len(rows))
-
-	for i := 0; i < len(rows); i += 2 {
-		beforeID, err := r.getDocID(rule, rows[i])
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		afterID, err := r.getDocID(rule, rows[i+1])
-
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		beforeParentID, afterParentID := "", ""
-		if len(rule.Parent) > 0 {
-			if beforeParentID, err = r.getParentID(rule, rows[i], rule.Parent); err != nil {
-				return nil, errors.Trace(err)
-			}
-			if afterParentID, err = r.getParentID(rule, rows[i+1], rule.Parent); err != nil {
-				return nil, errors.Trace(err)
-			}
-		}
-
-		req := &elastic.BulkRequest{Index: rule.Index, Type: rule.Type, ID: beforeID, Parent: beforeParentID}
-
-		if beforeID != afterID || beforeParentID != afterParentID {
-			req.Action = elastic.ActionDelete
-			reqs = append(reqs, req)
-
-			req = &elastic.BulkRequest{Index: rule.Index, Type: rule.Type, ID: afterID, Parent: afterParentID, Pipeline: rule.Pipeline}
-			r.makeInsertReqData(req, rule, rows[i+1])
-
-			esDeleteNum.WithLabelValues(rule.Index).Inc()
-			esInsertNum.WithLabelValues(rule.Index).Inc()
-		} else {
-			if len(rule.Pipeline) > 0 {
-				// Pipelines can only be specified on index action
-				r.makeInsertReqData(req, rule, rows[i+1])
-				// Make sure action is index, not create
-				req.Action = elastic.ActionIndex
-				req.Pipeline = rule.Pipeline
-			} else {
-				r.makeUpdateReqData(req, rule, rows[i], rows[i+1])
-			}
-			esUpdateNum.WithLabelValues(rule.Index).Inc()
-		}
-
-		reqs = append(reqs, req)
-	}
-
-	return reqs, nil
 }
 
 func (r *River) makeReqColumnData(col *schema.TableColumn, value interface{}) interface{} {
@@ -381,83 +254,6 @@ func (r *River) getFieldParts(k string, v string) (string, string, string) {
 	}
 
 	return mysql, elastic, fieldType
-}
-
-func (r *River) makeInsertReqData(req *elastic.BulkRequest, rule *Rule, values []interface{}) {
-	req.Data = make(map[string]interface{}, len(values))
-	req.Action = elastic.ActionIndex
-	// nested field add data
-	if rule.NestedRule {
-		req.NestedRequest = true
-		req.Action = elastic.ActionUpdate
-		allFields := make(map[string]interface{}, len(values))
-		for idx, column := range rule.TableInfo.Columns {
-			allFields[column.Name] = values[idx]
-			if column.Name == rule.IndexField {
-				req.ID = fmt.Sprintf("%v", values[idx])
-			}
-		}
-		req.Data = makeNestedFieldInsertRequest(rule.NestedField, allFields)
-		return
-	}
-	for i, c := range rule.TableInfo.Columns {
-		if !rule.CheckFilter(c.Name) {
-			continue
-		}
-		mapped := false
-		for k, v := range rule.FieldMapping {
-			mysql, elastic, fieldType := r.getFieldParts(k, v)
-			if mysql == c.Name {
-				mapped = true
-				req.Data[elastic] = r.getFieldValue(&c, fieldType, values[i])
-			}
-		}
-		if mapped == false {
-			req.Data[c.Name] = r.makeReqColumnData(&c, values[i])
-		}
-	}
-}
-
-func (r *River) makeUpdateReqData(req *elastic.BulkRequest, rule *Rule,
-	beforeValues []interface{}, afterValues []interface{}) {
-	req.Data = make(map[string]interface{}, len(beforeValues))
-	if rule.NestedRule {
-		req.NestedRequest = true
-		req.Action = elastic.ActionUpdate
-		allFields := make(map[string]interface{}, len(afterValues))
-		for idx, column := range rule.TableInfo.Columns {
-			allFields[column.Name] = afterValues[idx]
-			if column.Name == rule.IndexField {
-				req.ID = fmt.Sprintf("%v", afterValues[idx])
-			}
-		}
-		req.Data = makeNestedFieldUpdateRequest(rule.NestedField, rule.NestedPrimaryKey, allFields)
-		return
-	}
-	// maybe dangerous if something wrong delete before?
-	req.Action = elastic.ActionUpdate
-
-	for i, c := range rule.TableInfo.Columns {
-		mapped := false
-		if !rule.CheckFilter(c.Name) {
-			continue
-		}
-		if reflect.DeepEqual(beforeValues[i], afterValues[i]) {
-			//nothing changed
-			continue
-		}
-		for k, v := range rule.FieldMapping {
-			mysql, elastic, fieldType := r.getFieldParts(k, v)
-			if mysql == c.Name {
-				mapped = true
-				req.Data[elastic] = r.getFieldValue(&c, fieldType, afterValues[i])
-			}
-		}
-		if mapped == false {
-			req.Data[c.Name] = r.makeReqColumnData(&c, afterValues[i])
-		}
-
-	}
 }
 
 // If id in toml file is none, get primary keys in one row and format them into a string, and PK must not be nil

@@ -7,9 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/siddontang/go-mysql-elasticsearch/elastic"
+
 	"github.com/juju/errors"
 	"github.com/siddontang/go-log/log"
-	"github.com/siddontang/go-mysql-elasticsearch/elastic"
 	"github.com/siddontang/go-mysql/canal"
 )
 
@@ -24,7 +25,7 @@ type River struct {
 
 	canal *canal.Canal
 
-	rules map[string]*Rule
+	rules map[string]RuleInterface
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,7 +44,7 @@ func NewRiver(c *Config) (*River, error) {
 	r := new(River)
 
 	r.c = c
-	r.rules = make(map[string]*Rule)
+	r.rules = make(map[string]RuleInterface)
 	r.syncCh = make(chan interface{}, 4096)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -51,6 +52,8 @@ func NewRiver(c *Config) (*River, error) {
 	if r.master, err = loadMasterInfo(c.DataDir); err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	log.Infof("master info is %v", *r.master)
 
 	if err = r.newCanal(); err != nil {
 		return nil, errors.Trace(err)
@@ -110,9 +113,9 @@ func (r *River) prepareCanal() error {
 	dbs := map[string]struct{}{}
 	tables := make([]string, 0, len(r.rules))
 	for _, rule := range r.rules {
-		db = rule.Schema
-		dbs[rule.Schema] = struct{}{}
-		tables = append(tables, rule.Table)
+		db = rule.getSchema()
+		dbs[rule.getSchema()] = struct{}{}
+		tables = append(tables, rule.getTable())
 	}
 
 	if len(dbs) == 1 {
@@ -155,7 +158,7 @@ func (r *River) updateRule(schema, table string) error {
 		return errors.Trace(err)
 	}
 
-	rule.TableInfo = tableInfo
+	rule.setTableInfo(tableInfo)
 
 	return nil
 }
@@ -218,67 +221,87 @@ func (r *River) parseSource() (map[string][]string, error) {
 }
 
 func (r *River) prepareRule() error {
-	wildtables, err := r.parseSource()
+	_, err := r.parseSource()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	if r.c.Rules != nil {
+		for _, rule := range r.c.NestedRules {
+			if len(rule.Schema) == 0 {
+				return errors.Errorf("empty schema not allowed for rule")
+			}
+			key := ruleKey(rule.Schema, rule.Table)
+			if _, ok := r.rules[key]; !ok {
+				return errors.Errorf("rule %s, %s not defined in source", rule.Schema, rule.Table)
+			}
+			rule.prepare()
+			r.rules[key] = rule
+		}
 		// then, set custom mapping rule
 		for _, rule := range r.c.Rules {
 			if len(rule.Schema) == 0 {
 				return errors.Errorf("empty schema not allowed for rule")
 			}
-
-			if regexp.QuoteMeta(rule.Table) != rule.Table {
-				//wildcard table
-				tables, ok := wildtables[ruleKey(rule.Schema, rule.Table)]
-				if !ok {
-					return errors.Errorf("wildcard table for %s.%s is not defined in source", rule.Schema, rule.Table)
-				}
-
-				if len(rule.Index) == 0 {
-					return errors.Errorf("wildcard table rule %s.%s must have a index, can not empty", rule.Schema, rule.Table)
-				}
-
-				rule.prepare()
-
-				for _, table := range tables {
-					rr := r.rules[ruleKey(rule.Schema, table)]
-					rr.Index = rule.Index
-					rr.Type = rule.Type
-					rr.Parent = rule.Parent
-					rr.ID = rule.ID
-					rr.FieldMapping = rule.FieldMapping
-				}
-			} else {
-				key := ruleKey(rule.Schema, rule.Table)
-				if _, ok := r.rules[key]; !ok {
-					return errors.Errorf("rule %s, %s not defined in source", rule.Schema, rule.Table)
-				}
-				rule.prepare()
-				r.rules[key] = rule
+			key := ruleKey(rule.Schema, rule.Table)
+			if _, ok := r.rules[key]; !ok {
+				return errors.Errorf("rule %s, %s not defined in source", rule.Schema, rule.Table)
 			}
+			rule.prepare()
+			r.rules[key] = rule
+
+			//if regexp.QuoteMeta(rule.Table) != rule.Table {
+			//	//wildcard table
+			//	tables, ok := wildtables[ruleKey(rule.Schema, rule.Table)]
+			//	if !ok {
+			//		return errors.Errorf("wildcard table for %s.%s is not defined in source", rule.Schema, rule.Table)
+			//	}
+			//
+			//	if len(rule.Index) == 0 {
+			//		return errors.Errorf("wildcard table rule %s.%s must have a index, can not empty", rule.Schema, rule.Table)
+			//	}
+			//
+			//	rule.prepare()
+			//
+			//	for _, table := range tables {
+			//		rr := r.rules[ruleKey(rule.Schema, table)]
+			//		rr.Index = rule.Index
+			//		rr.Type = rule.Type
+			//		rr.Parent = rule.Parent
+			//		rr.ID = rule.ID
+			//		rr.FieldMapping = rule.FieldMapping
+			//	}
+			//} else {
+			//	key := ruleKey(rule.Schema, rule.Table)
+			//	if _, ok := r.rules[key]; !ok {
+			//		return errors.Errorf("rule %s, %s not defined in source", rule.Schema, rule.Table)
+			//	}
+			//	rule.prepare()
+			//	r.rules[key] = rule
+			//}
 		}
 	}
 
-	rules := make(map[string]*Rule)
-	for key, rule := range r.rules {
-		if rule.TableInfo, err = r.canal.GetTable(rule.Schema, rule.Table); err != nil {
+	//rules := make(map[string]*Rule)
+	for _, rule := range r.rules {
+		if tableInfo, err := r.canal.GetTable(rule.getSchema(), rule.getTable()); err != nil {
 			return errors.Trace(err)
-		}
-
-		if len(rule.TableInfo.PKColumns) == 0 {
-			if !r.c.SkipNoPkTable {
-				return errors.Errorf("%s.%s must have a PK for a column", rule.Schema, rule.Table)
-			}
-
-			log.Errorf("ignored table without a primary key: %s\n", rule.TableInfo.Name)
 		} else {
-			rules[key] = rule
+			rule.setTableInfo(tableInfo)
 		}
 	}
-	r.rules = rules
+	//
+	//	if len(rule.TableInfo.PKColumns) == 0 {
+	//		if !r.c.SkipNoPkTable {
+	//			return errors.Errorf("%s.%s must have a PK for a column", rule.Schema, rule.Table)
+	//		}
+	//
+	//		log.Errorf("ignored table without a primary key: %s\n", rule.TableInfo.Name)
+	//	} else {
+	//		rules[key] = rule
+	//	}
+	//}
+	//r.rules = rules
 
 	return nil
 }

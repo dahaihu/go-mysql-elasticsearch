@@ -1,9 +1,14 @@
 package river
 
 import (
-	"github.com/siddontang/go-mysql-elasticsearch/elastic"
+	"bytes"
+	"fmt"
 	"strings"
 
+	"github.com/siddontang/go-mysql-elasticsearch/elastic"
+
+	"github.com/siddontang/go-log/log"
+	"github.com/siddontang/go-mysql/canal"
 	"github.com/siddontang/go-mysql/schema"
 )
 
@@ -17,7 +22,6 @@ type Rule struct {
 	// only one could be used
 	Index      string   `toml:"index"`
 	IndexField string   `toml:"index_field"`
-	NestedRule bool     `toml:"nested_rule"`
 	Type       string   `toml:"type"`
 	Parent     string   `toml:"parent"`
 	ID         []string `toml:"id"`
@@ -36,6 +40,43 @@ type Rule struct {
 	// Elasticsearch pipeline
 	// To pre-process documents before indexing
 	Pipeline string `toml:"pipeline"`
+}
+
+func (r *Rule) getIndex(rows []interface{}) string {
+	// todo check index field exist when read config
+	if len(r.Index) != 0 {
+		return r.Index
+	}
+	for idx, column := range r.TableInfo.Columns {
+		if column.Name == r.IndexField {
+			return fmt.Sprintf("%v", rows[idx])
+		}
+	}
+	panic("invalid rows info")
+}
+
+func (r *Rule) getDocID(row []interface{}) string {
+	// todo error process
+	var ids []interface{}
+	if r.ID == nil {
+		ids, _ = r.TableInfo.GetPKValues(row)
+	} else {
+		ids = make([]interface{}, 0, len(r.ID))
+		for _, column := range r.ID {
+			value, _ := r.TableInfo.GetColumnValue(column, row)
+			ids = append(ids, value)
+		}
+	}
+
+	var buf bytes.Buffer
+
+	sep := ""
+	for _, value := range ids {
+		buf.WriteString(fmt.Sprintf("%s%v", sep, value))
+		sep = ":"
+	}
+
+	return buf.String()
 }
 
 func newDefaultRule(schema string, table string) *Rule {
@@ -88,23 +129,52 @@ func (r *Rule) CheckFilter(field string) bool {
 	return false
 }
 
-func (r *Rule) makeInsertReqData(req *elastic.BulkRequest, values []interface{}) {
-	req.Data = make(map[string]interface{}, len(values))
-	req.Action = elastic.ActionIndex
-	for i, c := range r.TableInfo.Columns {
-		if !r.CheckFilter(c.Name) {
-			continue
-		}
-		mapped := false
-		for k, v := range r.FieldMapping {
-			if c.Name == k {
-				req.Data[v] = values[i]
-				mapped = true
-				break
-			}
-		}
-		if mapped == false {
-			req.Data[c.Name] = values[i]
-		}
+func (r *Rule) makeRequest(action string, rows [][]interface{}) ([]*elastic.BulkRequest, error) {
+	log.Printf("schame is %s, table is %s\n", r.Schema, r.Table)
+	reqs := make([]*elastic.BulkRequest, 0, len(rows))
+	var elasticAction string
+	switch action {
+	case canal.InsertAction:
+		elasticAction = elastic.ActionIndex
+	case canal.UpdateAction:
+		elasticAction = elastic.ActionUpdate
+	case canal.DeleteAction:
+		elasticAction = elastic.ActionDelete
 	}
+	for _, values := range rows {
+		req := &elastic.BulkRequest{
+			Index:         r.getIndex(values),
+			Type:          r.Type,
+			ID:            r.getDocID(values),
+			NestedRequest: false,
+			Pipeline:      r.Pipeline,
+			Action:        elasticAction,
+		}
+		req.Data = make(map[string]interface{}, len(values))
+		for idx, column := range r.TableInfo.Columns {
+			req.Data[column.Name] = values[idx]
+		}
+		//log.Infof("action is %s, index is %s, type is %s, data is %v\n",
+		//	req.Action, req.Index, req.Type, req.Data,
+		//)
+		reqs = append(reqs, req)
+	}
+
+	return reqs, nil
+}
+
+func (r *Rule) setTableInfo(tableInfo *schema.Table) {
+	r.TableInfo = tableInfo
+}
+
+func (r *Rule) getTableInfo() *schema.Table {
+	return r.TableInfo
+}
+
+func (r *Rule) getTable() string {
+	return r.Table
+}
+
+func (r *Rule) getSchema() string {
+	return r.Schema
 }
